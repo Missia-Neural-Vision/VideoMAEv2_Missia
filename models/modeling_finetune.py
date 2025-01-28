@@ -17,6 +17,27 @@ from timm.models.registry import register_model
 
 
 def _cfg(url='', **kwargs):
+    """Creates a configuration dictionary with default values for video model settings.
+
+    This function creates a configuration dictionary with predefined default values
+    for various model parameters like input dimensions, preprocessing settings, etc.
+    The function allows overriding any default values through keyword arguments.
+
+    Args:
+        url (str, optional): URL for model weights. Defaults to ''.
+        **kwargs: Additional keyword arguments to override default configuration values.
+
+    Returns:
+        dict: Configuration dictionary containing the following default key-value pairs:
+            - url (str): URL for model weights
+            - num_classes (int): Number of output classes (default: 400)
+            - input_size (tuple): Expected input dimensions (C, H, W) (default: (3, 224, 224))
+            - pool_size (None): Pooling size
+            - crop_pct (float): Crop percentage for preprocessing (default: 0.9)
+            - interpolation (str): Interpolation method (default: 'bicubic')
+            - mean (tuple): Normalization mean values (default: (0.5, 0.5, 0.5))
+            - std (tuple): Normalization standard deviation values (default: (0.5, 0.5, 0.5))
+    """
     return {
         'url': url,
         'num_classes': 400,
@@ -31,7 +52,27 @@ def _cfg(url='', **kwargs):
 
 
 class DropPath(nn.Module):
-    """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks).
+    """Drop paths (Stochastic Depth) per sample when applied in main path of residual blocks.
+
+    This implements the DropPath regularization technique, also known as Stochastic Depth,
+    which randomly drops entire paths (layers) during training for regularization.
+
+    Args:
+        drop_prob (float, optional): Probability of dropping a path. Defaults to None.
+
+    Methods:
+        forward(x): Applies drop path to the input tensor.
+        extra_repr(): Returns string representation of drop probability.
+
+    Returns:
+        tensor: Output after applying drop path.
+
+    Example:
+        >>> m = DropPath(drop_prob=0.2)
+        >>> output = m(input_tensor)
+
+    References:
+        Deep Networks with Stochastic Depth (https://arxiv.org/abs/1603.09382)
     """
 
     def __init__(self, drop_prob=None):
@@ -46,6 +87,25 @@ class DropPath(nn.Module):
 
 
 class Mlp(nn.Module):
+    """Multi-layer Perceptron (MLP) module.
+
+    A simple MLP that contains two linear transformations with a GELU activation in between.
+
+    Args:
+        in_features (int): Number of input features
+        hidden_features (int, optional): Number of hidden features. Defaults to in_features.
+        out_features (int, optional): Number of output features. Defaults to in_features.
+        act_layer (nn.Module, optional): Activation layer. Defaults to nn.GELU.
+        drop (float, optional): Dropout rate. Defaults to 0.0.
+
+    Returns:
+        torch.Tensor: Output tensor after MLP transformation
+
+    Example:
+        >>> mlp = Mlp(in_features=768, hidden_features=3072)
+        >>> x = torch.randn(1, 197, 768)
+        >>> output = mlp(x)  # shape: (1, 197, 768)
+    """
 
     def __init__(self,
                  in_features,
@@ -72,6 +132,38 @@ class Mlp(nn.Module):
 
 
 class CosAttention(nn.Module):
+    """Cosine Attention module.
+
+    This module implements a multi-head attention mechanism using cosine similarity
+    for computing attention scores. It normalizes the query and key vectors before
+    computing their dot product and applies learned temperature scaling.
+
+    Args:
+        dim (int): Input dimension.
+        num_heads (int, optional): Number of attention heads. Defaults to 8.
+        qkv_bias (bool, optional): If True, adds bias to query, key, value projections. 
+            Defaults to False.
+        qk_scale (float, optional): Override default qk scale of 1/sqrt(head_dim).
+            Defaults to None.
+        attn_drop (float, optional): Dropout rate for attention weights. 
+            Defaults to 0.0.
+        proj_drop (float, optional): Dropout rate for output. Defaults to 0.0.
+        attn_head_dim (int, optional): Override default head dimension calculation.
+            Defaults to None.
+
+    Attributes:
+        num_heads (int): Number of attention heads
+        scale (nn.Parameter or float): Learned or fixed scaling factor for attention scores
+        qkv (nn.Linear): Linear projection for query, key, value
+        q_bias (nn.Parameter or None): Bias for query projection
+        v_bias (nn.Parameter or None): Bias for value projection
+        proj (nn.Linear): Output projection
+        attn_drop (nn.Dropout): Dropout for attention weights
+        proj_drop (nn.Dropout): Dropout for output
+
+    Returns:
+        torch.Tensor: Transformed input tensor with same shape as input
+    """
 
     def __init__(self,
                  dim,
@@ -140,6 +232,34 @@ class CosAttention(nn.Module):
 
 
 class Attention(nn.Module):
+    """Multi-head Self Attention module.
+
+    This module implements multi-head self attention mechanism that allows the model to jointly attend
+    to information from different representation subspaces at different positions.
+
+    Args:
+        dim (int): Input dimension.
+        num_heads (int, optional): Number of attention heads. Defaults to 8.
+        qkv_bias (bool, optional): If True, use bias terms for query, key, value projections. Defaults to False.
+        qk_scale (float, optional): Override default qk scale of head_dim ** -0.5 if set. Defaults to None.
+        attn_drop (float, optional): Dropout rate for attention weights. Defaults to 0.0.
+        proj_drop (float, optional): Dropout rate for output. Defaults to 0.0.
+        attn_head_dim (int, optional): Override default head dimension if set. Defaults to None.
+
+    Attributes:
+        num_heads (int): Number of parallel attention heads.
+        scale (float): Scaling factor for query-key attention scores.
+        qkv (nn.Linear): Linear projection for query, key, and value.
+        q_bias (nn.Parameter or None): Learnable bias for query projection.
+        v_bias (nn.Parameter or None): Learnable bias for value projection.
+        attn_drop (nn.Dropout): Dropout layer for attention weights.
+        proj (nn.Linear): Output projection layer.
+        proj_drop (nn.Dropout): Dropout layer for output.
+
+    Returns:
+        torch.Tensor: Attention output of shape (B, N, dim) where B is batch size,
+            N is sequence length, and dim is input dimension.
+    """
 
     def __init__(self,
                  dim,
@@ -196,6 +316,38 @@ class Attention(nn.Module):
 
 
 class Block(nn.Module):
+    """A Transformer block implementation for vision tasks.
+
+    This block implements a standard Transformer architecture with self-attention
+    and MLP layers, including optional layer scaling and stochastic depth.
+
+    Args:
+        dim (int): Input dimension/number of features.
+        num_heads (int): Number of attention heads.
+        mlp_ratio (float, optional): Ratio of MLP hidden dimension to input dimension. Defaults to 4.0.
+        qkv_bias (bool, optional): If True, adds bias to the QKV projection. Defaults to False.
+        qk_scale (float, optional): Override default qk scale of head_dim ** -0.5 if set. Defaults to None.
+        drop (float, optional): Dropout rate. Defaults to 0.0.
+        attn_drop (float, optional): Attention dropout rate. Defaults to 0.0.
+        drop_path (float, optional): Stochastic depth rate. Defaults to 0.0.
+        init_values (float, optional): Initial value for layer scale. If >0, enables layer scale. Defaults to None.
+        act_layer (nn.Module, optional): Activation layer. Defaults to nn.GELU.
+        norm_layer (nn.Module, optional): Normalization layer. Defaults to nn.LayerNorm.
+        attn_head_dim (int, optional): Dimension of each attention head. Defaults to None.
+        cos_attn (bool, optional): If True, uses cosine attention instead of dot product. Defaults to False.
+
+    Attributes:
+        norm1 (nn.Module): First normalization layer
+        attn (nn.Module): Self-attention module (either standard or cosine)
+        drop_path (nn.Module): Stochastic depth layer
+        norm2 (nn.Module): Second normalization layer
+        mlp (nn.Module): MLP module
+        gamma_1 (nn.Parameter or None): Layer scale for attention output
+        gamma_2 (nn.Parameter or None): Layer scale for MLP output
+
+    Returns:
+        torch.Tensor: Transformed input tensor of same shape as input
+    """
 
     def __init__(self,
                  dim,
@@ -261,7 +413,37 @@ class Block(nn.Module):
 
 
 class PatchEmbed(nn.Module):
-    """ Image to Patch Embedding
+    """3D Patch Embedding layer for video inputs.
+
+    This module converts a video tensor into a sequence of patch embeddings. It first splits
+    the video into non-overlapping 3D patches (tubelets) and then projects them into an
+    embedding space using a 3D convolutional layer.
+
+    Args:
+        img_size (int, optional): Size of input image. Defaults to 224.
+        patch_size (int, optional): Size of each patch. Defaults to 16.
+        in_chans (int, optional): Number of input channels. Defaults to 3.
+        embed_dim (int, optional): Dimension of output embeddings. Defaults to 768.
+        num_frames (int, optional): Number of frames in input video. Defaults to 16.
+        tubelet_size (int, optional): Temporal size of each 3D patch. Defaults to 2.
+
+    Attributes:
+        img_size (tuple): Spatial dimensions of input images (H, W).
+        tubelet_size (int): Temporal dimension of 3D patches.
+        patch_size (tuple): Spatial dimensions of patches (H, W).
+        num_patches (int): Total number of patches.
+        proj (nn.Conv3d): 3D convolution layer for patch projection.
+
+    Shape:
+        - Input: (B, C, T, H, W)
+            B: batch size
+            C: channels
+            T: number of frames
+            H: height
+            W: width
+        - Output: (B, N, D)
+            N: number of patches
+            D: embedding dimension
     """
 
     def __init__(self,
@@ -300,7 +482,30 @@ class PatchEmbed(nn.Module):
 # sin-cos position encoding
 # https://github.com/jadore801120/attention-is-all-you-need-pytorch/blob/master/transformer/Models.py#L31
 def get_sinusoid_encoding_table(n_position, d_hid):
-    ''' Sinusoid position encoding table '''
+    """Returns a sinusoidal positional encoding table as a tensor.
+
+    The function creates a positional encoding matrix using sine and cosine functions
+    at different frequencies, which helps transformer models encode sequential position
+    information.
+
+    Args:
+        n_position (int): Number of positions to encode
+        d_hid (int): Dimension of the positional encoding vectors
+
+    Returns:
+        torch.Tensor: A tensor of shape (1, n_position, d_hid) containing the
+            positional encodings. The tensor has requires_grad=False.
+
+    Note:
+        This implementation currently uses numpy for the initial computation before
+        converting to a torch tensor. The sine function is applied to even indices
+        and cosine to odd indices of the encoding vectors.
+
+    Example:
+        >>> encoding_table = get_sinusoid_encoding_table(100, 512)
+        >>> print(encoding_table.shape)
+        torch.Size([1, 100, 512])
+    """
 
     # TODO: make it with torch instead of numpy
     def get_position_angle_vec(position):
@@ -319,7 +524,53 @@ def get_sinusoid_encoding_table(n_position, d_hid):
 
 
 class VisionTransformer(nn.Module):
-    """ Vision Transformer with support for patch or hybrid CNN input stage
+    """Vision Transformer model for video and image processing.
+
+    This implementation supports patch or hybrid CNN input stage and includes various
+    features like learnable/sinusoidal positional embeddings, dropout, and attention mechanisms.
+
+    Args:
+        img_size (int): Input image size. Default: 224
+        patch_size (int): Size of patches to embed. Default: 16
+        in_chans (int): Number of input channels. Default: 3
+        num_classes (int): Number of classes for classification. Default: 1000
+        embed_dim (int): Embedding dimension. Default: 768
+        depth (int): Number of transformer blocks. Default: 12
+        num_heads (int): Number of attention heads. Default: 12
+        mlp_ratio (float): MLP hidden dim ratio. Default: 4.0
+        qkv_bias (bool): Enable bias for qkv projections. Default: False
+        qk_scale (float): Override default qk scale. Default: None
+        drop_rate (float): Dropout rate. Default: 0.0
+        attn_drop_rate (float): Attention dropout rate. Default: 0.0
+        drop_path_rate (float): Drop path rate. Default: 0.0
+        head_drop_rate (float): Classifier head dropout rate. Default: 0.0
+        norm_layer (nn.Module): Normalization layer. Default: nn.LayerNorm
+        init_values (float): Initial layer scale values. Default: 0.0
+        use_learnable_pos_emb (bool): Use learnable positional embeddings. Default: False
+        init_scale (float): Initial scale for classifier weights. Default: 0.0
+        all_frames (int): Number of frames in input video. Default: 16
+        tubelet_size (int): Size of video tubelets. Default: 2
+        use_mean_pooling (bool): Use mean pooling for feature aggregation. Default: True
+        with_cp (bool): Use checkpoint for gradient computation. Default: False
+        cos_attn (bool): Use cosine attention. Default: False
+
+    Attributes:
+        num_classes (int): Number of output classes
+        num_features (int): Number of output features (same as embed_dim)
+        embed_dim (int): Dimension of token embeddings
+        tubelet_size (int): Size of video tubelets
+        
+    Methods:
+        forward_features(x): Computes features from input
+        forward(x): Complete forward pass
+        get_num_layers(): Returns number of transformer blocks
+        get_classifier(): Returns classification head
+        reset_classifier(num_classes): Resets the classification head
+        
+    Example:
+        >>> model = VisionTransformer(img_size=224, patch_size=16, num_classes=1000)
+        >>> x = torch.randn(1, 3, 16, 224, 224)  # [B, C, T, H, W]
+        >>> output = model(x)  # [B, num_classes]
     """
 
     def __init__(self,
@@ -456,6 +707,29 @@ class VisionTransformer(nn.Module):
 
 @register_model
 def vit_small_patch16_224(pretrained=False, **kwargs):
+    """Creates a small Vision Transformer (ViT) model with patch size 16x16 for 224x224 images.
+
+    This function instantiates a ViT model with a specific configuration suitable for
+    smaller-scale vision tasks. The model uses a patch size of 16x16 pixels and is designed
+    for input images of size 224x224 pixels.
+
+    Args:
+        pretrained (bool, optional): Whether to load pre-trained weights. Defaults to False.
+        **kwargs: Additional arguments to pass to the VisionTransformer constructor.
+
+    Returns:
+        VisionTransformer: A Vision Transformer model with the following specifications:
+            - Patch size: 16x16
+            - Embedding dimension: 384
+            - Depth: 12 transformer layers
+            - Number of attention heads: 6
+            - MLP ratio: 4
+            - QKV bias: True
+            - Normalization: LayerNorm with eps=1e-6
+
+    Example:
+        >>> model = vit_small_patch16_224(pretrained=False)
+    """
     model = VisionTransformer(
         patch_size=16,
         embed_dim=384,
@@ -471,6 +745,22 @@ def vit_small_patch16_224(pretrained=False, **kwargs):
 
 @register_model
 def vit_base_patch16_224(pretrained=False, **kwargs):
+    """Initialize a base Vision Transformer model with patch size 16x16 and input size 224x224.
+
+    This function creates a Vision Transformer (ViT) model with base configuration, which includes
+    12 transformer layers, 12 attention heads, and embedding dimension of 768.
+
+    Args:
+        pretrained (bool, optional): If True, returns a model pre-trained on ImageNet.
+            Defaults to False.
+        **kwargs: Additional keyword arguments passed to the VisionTransformer constructor.
+
+    Returns:
+        VisionTransformer: A Vision Transformer model instance with base configuration.
+
+    Example:
+        >>> model = vit_base_patch16_224(pretrained=False)
+    """
     model = VisionTransformer(
         patch_size=16,
         embed_dim=768,
@@ -486,6 +776,29 @@ def vit_base_patch16_224(pretrained=False, **kwargs):
 
 @register_model
 def vit_large_patch16_224(pretrained=False, **kwargs):
+    """Creates a Vision Transformer (ViT) model with large architecture and 16x16 patches.
+
+    This function instantiates a Vision Transformer model with specific architectural parameters
+    suitable for 224x224 input images. The model uses patch size of 16, resulting in 14x14 patches.
+
+    Args:
+        pretrained (bool, optional): If True, returns a model pre-trained on ImageNet.
+            Defaults to False.
+        **kwargs: Additional arguments passed to the VisionTransformer constructor.
+
+    Returns:
+        VisionTransformer: A Vision Transformer model with the following specifications:
+            - Patch size: 16x16
+            - Embedding dimension: 1024
+            - Depth: 24 transformer layers
+            - Number of attention heads: 16
+            - MLP ratio: 4
+            - QKV bias: True
+            - Layer normalization with eps=1e-6
+
+    Example:
+        >>> model = vit_large_patch16_224(pretrained=True)
+    """
     model = VisionTransformer(
         patch_size=16,
         embed_dim=1024,
@@ -501,6 +814,28 @@ def vit_large_patch16_224(pretrained=False, **kwargs):
 
 @register_model
 def vit_huge_patch16_224(pretrained=False, **kwargs):
+    """Initialize a huge Vision Transformer model with patch size 16x16 for 224x224 images.
+
+    This function creates a Vision Transformer (ViT) model with huge architecture specifications,
+    designed for processing 224x224 pixel images with 16x16 patch size.
+
+    Args:
+        pretrained (bool, optional): Whether to load pretrained weights. Defaults to False.
+        **kwargs: Additional arguments to pass to the VisionTransformer constructor.
+
+    Returns:
+        VisionTransformer: A ViT model with the following specifications:
+            - Patch size: 16x16
+            - Embedding dimension: 1280
+            - Depth: 32 layers
+            - Number of attention heads: 16
+            - MLP ratio: 4
+            - QKV bias: True
+            - Layer normalization epsilon: 1e-6
+
+    Note:
+        This model uses Layer Normalization with an epsilon value of 1e-6.
+    """
     model = VisionTransformer(
         patch_size=16,
         embed_dim=1280,
@@ -516,6 +851,28 @@ def vit_huge_patch16_224(pretrained=False, **kwargs):
 
 @register_model
 def vit_giant_patch14_224(pretrained=False, **kwargs):
+    """Create a Giant Vision Transformer (ViT) model with patch size 14x14 for 224x224 images.
+
+    This function creates a Vision Transformer model with the following specifications:
+    - Patch size: 14x14
+    - Embedding dimension: 1408
+    - Depth: 40 layers
+    - Number of attention heads: 16
+    - MLP ratio: 48/11
+    - QKV bias: True
+    - Layer normalization epsilon: 1e-6
+
+    Args:
+        pretrained (bool): If True, returns a model pre-trained on ImageNet.
+        **kwargs: Additional arguments passed to the VisionTransformer constructor.
+
+    Returns:
+        VisionTransformer: A Giant Vision Transformer model instance.
+
+    Note:
+        This model variant follows the architecture described in the original ViT paper
+        but with significantly larger parameters suitable for high-capacity tasks.
+    """
     model = VisionTransformer(
         patch_size=14,
         embed_dim=1408,
